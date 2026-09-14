@@ -39,6 +39,8 @@ public final class FraxyTimelapseMod {
     private static TimelapseConfig config;
     private static final Map<String, Integer> pendingChanges = new ConcurrentHashMap<>();
     private static final Map<String, Long> lastTriggerMs = new ConcurrentHashMap<>();
+    private static final java.util.Set<String> inflightTriggers = ConcurrentHashMap.newKeySet();
+    private static final java.util.Set<String> configWarned = ConcurrentHashMap.newKeySet();
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
@@ -109,16 +111,22 @@ public final class FraxyTimelapseMod {
                 continue;
             }
 
-            // We reached threshold AND cooldown expired. Reset counter and trigger.
-            pendingChanges.put(camera.id, 0);
-            lastTriggerMs.put(camera.id, now);
+            // We reached threshold AND cooldown expired.
+            // Only trigger if a request is not already in-flight for this camera.
+            if (!inflightTriggers.add(camera.id)) {
+                continue;
+            }
+
             triggerWebhook(camera, changes);
         }
     }
 
     private static void triggerWebhook(CameraZone camera, int changes) {
         if (config.webhookUrl == null || config.webhookUrl.isBlank() || config.webhookToken == null || config.webhookToken.isBlank()) {
-            LOGGER.warn("Camera {} reached threshold, but webhook is not configured.", camera.id);
+            if (configWarned.add(camera.id)) {
+                LOGGER.warn("Camera {} reached threshold, but webhook is not configured. Config must not be empty.", camera.id);
+            }
+            inflightTriggers.remove(camera.id);
             return;
         }
 
@@ -127,24 +135,40 @@ public final class FraxyTimelapseMod {
         payload.addProperty("changes", changes);
         payload.addProperty("timestamp", System.currentTimeMillis());
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(config.webhookUrl))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.webhookToken)
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
-                .build();
+        HttpRequest request;
+        try {
+            request = HttpRequest.newBuilder(URI.create(config.webhookUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.webhookToken)
+                    .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                    .build();
+        } catch (IllegalArgumentException e) {
+            if (configWarned.add(camera.id)) {
+                LOGGER.warn("Camera {} has an invalid webhook URL: {}", camera.id, e.getMessage());
+            }
+            inflightTriggers.remove(camera.id);
+            return;
+        }
 
         HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .whenComplete((response, error) -> {
                     if (error != null) {
-                        LOGGER.warn("Webhook failed for camera {}: {}", camera.id, error.toString());
+                        LOGGER.warn("Webhook failed for camera {}: {}. Will retry on next event.", camera.id, error.toString());
+                        inflightTriggers.remove(camera.id);
                         return;
                     }
                     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        LOGGER.warn("Webhook returned HTTP {} for camera {}: {}", response.statusCode(), camera.id, response.body());
+                        LOGGER.warn("Webhook returned HTTP {} for camera {}: {}. Will retry on next event.", response.statusCode(), camera.id, response.body());
+                        inflightTriggers.remove(camera.id);
                         return;
                     }
+
+                    // Success! Update state.
+                    pendingChanges.merge(camera.id, -changes, Integer::sum);
+                    lastTriggerMs.put(camera.id, System.currentTimeMillis());
                     LOGGER.info("Timelapse trigger sent for camera {} after {} block changes.", camera.id, changes);
+                    inflightTriggers.remove(camera.id);
                 });
     }
 
