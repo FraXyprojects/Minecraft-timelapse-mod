@@ -9,12 +9,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.level.BlockEvent;
-import net.minecraftforge.event.server.ServerLifecycleHooks;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.server.command.ConfigCommand;
-import net.minecraftforge.fml.event.lifecycle.FMLServerStartingEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -58,11 +55,6 @@ public final class FraxyTimelapseMod {
         saveConfig(configPath, config);
         LOGGER.info("FraXy Timelapse loaded: {} camera zones, threshold={}, cooldown={}s",
                 config.cameras.size(), config.changeThreshold, config.cooldownSeconds);
-    }
-
-    @SubscribeEvent
-    public void onServerStarting(FMLServerStartingEvent event) {
-        ConfigCommand.register(event.getServer().getCommands().getDispatcher(), event.getServer().getCommandSource().getServer());
     }
 
     @SubscribeEvent
