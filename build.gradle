@@ -1,0 +1,94 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+group = 'com.fraxyprojects'
+version = '0.1.0'
+
+base {
+    archivesName = 'fraxy-timelapse'
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+            mods {
+                fraxy_timelapse {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            args '--nogui'
+        }
+
+        client {
+        }
+    }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.4.23'
+}
+
+def generatedResources = layout.buildDirectory.dir('generated/sources/mergedResources')
+
+sourceSets.main.resources { srcDir generatedResources }
+
+repositories {
+    maven { url = 'https://maven.minecraftforge.net' }
+}
+
+tasks.withType(ProcessResources).configureEach {
+    def replaceProperties = [
+        minecraft_version: '1.20.1',
+        forge_version: '47.4.23',
+        mod_id: 'fraxy_timelapse',
+        mod_name: 'FraXy Timelapse',
+        mod_version: project.version,
+        mod_authors: 'FraXyprojects',
+        mod_description: 'Server-side change detector and webhook trigger for Minecraft timelapse snapshots.'
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'     : 'fraxy_timelapse',
+            'Specification-Vendor'    : 'FraXyprojects',
+            'Specification-Version'   : '1',
+            'Implementation-Title'    : project.name,
+            'Implementation-Version'  : project.jar.archiveVersion,
+            'Implementation-Vendor'   : 'FraXyprojects'
+        ])
+    }
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven { url = layout.buildDirectory.dir('repo') }
+    }
+}
