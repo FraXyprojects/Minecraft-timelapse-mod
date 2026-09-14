@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+    }
+}
+
+rootProject.name = 'fraxy-timelapse'
