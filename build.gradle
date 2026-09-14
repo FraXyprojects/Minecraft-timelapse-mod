@@ -48,10 +48,6 @@ def generatedResources = layout.buildDirectory.dir('generated/sources/mergedReso
 
 sourceSets.main.resources { srcDir generatedResources }
 
-repositories {
-    maven { url = 'https://maven.minecraftforge.net' }
-}
-
 tasks.withType(ProcessResources).configureEach {
     def replaceProperties = [
         minecraft_version: '1.20.1',
@@ -65,7 +61,7 @@ tasks.withType(ProcessResources).configureEach {
     inputs.properties replaceProperties
 
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
-        expand replaceProperties + [project: project]
+        expand replaceProperties
     }
 }
 
