@@ -39,6 +39,8 @@ public final class FraxyTimelapseMod {
     private static TimelapseConfig config;
     private static final Map<String, Integer> pendingChanges = new ConcurrentHashMap<>();
     private static final Map<String, Long> lastTriggerMs = new ConcurrentHashMap<>();
+    private static final java.util.Set<String> inflightTriggers = ConcurrentHashMap.newKeySet();
+    private static final java.util.Set<String> configWarned = ConcurrentHashMap.newKeySet();
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
@@ -58,16 +60,31 @@ public final class FraxyTimelapseMod {
     }
 
     @SubscribeEvent
-    public void onBlockEvent(BlockEvent event) {
-        if (config == null || event.getLevel().isClientSide()) {
+    public void onBlockBreakEvent(BlockEvent.BreakEvent event) {
+        handleBlockChange(event.getLevel(), event.getPos());
+    }
+
+    @SubscribeEvent
+    public void onEntityPlaceEvent(BlockEvent.EntityPlaceEvent event) {
+        handleBlockChange(event.getLevel(), event.getPos());
+    }
+
+    @SubscribeEvent
+    public void onEntityMultiPlaceEvent(BlockEvent.EntityMultiPlaceEvent event) {
+        for (net.minecraftforge.common.util.BlockSnapshot snapshot : event.getReplacedBlockSnapshots()) {
+            handleBlockChange(event.getLevel(), snapshot.getPos());
+        }
+    }
+
+    private void handleBlockChange(net.minecraft.world.level.LevelAccessor levelAccessor, BlockPos pos) {
+        if (config == null || levelAccessor.isClientSide()) {
             return;
         }
 
-        if (!(event.getLevel() instanceof ServerLevel level)) {
+        if (!(levelAccessor instanceof ServerLevel level)) {
             return;
         }
 
-        BlockPos pos = event.getPos();
         for (CameraZone camera : config.cameras.values()) {
             if (!camera.enabled || !camera.world.equals(level.dimension().location().toString())) {
                 continue;
@@ -76,27 +93,40 @@ public final class FraxyTimelapseMod {
                 continue;
             }
 
+            // Always accumulate changes
             int changes = pendingChanges.merge(camera.id, 1, Integer::sum);
+
+            // Check if we meet threshold
             if (changes < config.changeThreshold) {
                 continue;
             }
 
+            // Check if cooldown has expired
             long now = System.currentTimeMillis();
             long cooldownMs = config.cooldownSeconds * 1000L;
             long last = lastTriggerMs.getOrDefault(camera.id, 0L);
             if (now - last < cooldownMs) {
+                // If on cooldown, we just continue accumulating changes.
+                // We do NOT trigger until the NEXT event after cooldown expires.
                 continue;
             }
 
-            pendingChanges.put(camera.id, 0);
-            lastTriggerMs.put(camera.id, now);
+            // We reached threshold AND cooldown expired.
+            // Only trigger if a request is not already in-flight for this camera.
+            if (!inflightTriggers.add(camera.id)) {
+                continue;
+            }
+
             triggerWebhook(camera, changes);
         }
     }
 
     private static void triggerWebhook(CameraZone camera, int changes) {
         if (config.webhookUrl == null || config.webhookUrl.isBlank() || config.webhookToken == null || config.webhookToken.isBlank()) {
-            LOGGER.warn("Camera {} reached threshold, but webhook is not configured.", camera.id);
+            if (configWarned.add(camera.id)) {
+                LOGGER.warn("Camera {} reached threshold, but webhook is not configured. Config must not be empty.", camera.id);
+            }
+            inflightTriggers.remove(camera.id);
             return;
         }
 
@@ -105,24 +135,40 @@ public final class FraxyTimelapseMod {
         payload.addProperty("changes", changes);
         payload.addProperty("timestamp", System.currentTimeMillis());
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create(config.webhookUrl))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.webhookToken)
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
-                .build();
+        HttpRequest request;
+        try {
+            request = HttpRequest.newBuilder(URI.create(config.webhookUrl))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.webhookToken)
+                    .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                    .build();
+        } catch (IllegalArgumentException e) {
+            if (configWarned.add(camera.id)) {
+                LOGGER.warn("Camera {} has an invalid webhook URL: {}", camera.id, e.getMessage());
+            }
+            inflightTriggers.remove(camera.id);
+            return;
+        }
 
         HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .whenComplete((response, error) -> {
                     if (error != null) {
-                        LOGGER.warn("Webhook failed for camera {}: {}", camera.id, error.toString());
+                        LOGGER.warn("Webhook failed for camera {}: {}. Will retry on next event.", camera.id, error.toString());
+                        inflightTriggers.remove(camera.id);
                         return;
                     }
                     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        LOGGER.warn("Webhook returned HTTP {} for camera {}: {}", response.statusCode(), camera.id, response.body());
+                        LOGGER.warn("Webhook returned HTTP {} for camera {}: {}. Will retry on next event.", response.statusCode(), camera.id, response.body());
+                        inflightTriggers.remove(camera.id);
                         return;
                     }
+
+                    // Success! Update state.
+                    pendingChanges.merge(camera.id, -changes, Integer::sum);
+                    lastTriggerMs.put(camera.id, System.currentTimeMillis());
                     LOGGER.info("Timelapse trigger sent for camera {} after {} block changes.", camera.id, changes);
+                    inflightTriggers.remove(camera.id);
                 });
     }
 
@@ -140,6 +186,12 @@ public final class FraxyTimelapseMod {
                 }
                 if (loaded.cameras == null) {
                     loaded.cameras = new LinkedHashMap<>();
+                }
+                if (loaded.webhookUrl == null) {
+                    loaded.webhookUrl = "";
+                }
+                if (loaded.webhookToken == null) {
+                    loaded.webhookToken = "";
                 }
                 return loaded;
             }
