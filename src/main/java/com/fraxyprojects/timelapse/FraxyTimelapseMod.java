@@ -58,16 +58,31 @@ public final class FraxyTimelapseMod {
     }
 
     @SubscribeEvent
-    public void onBlockEvent(BlockEvent event) {
-        if (config == null || event.getLevel().isClientSide()) {
+    public void onBlockBreakEvent(BlockEvent.BreakEvent event) {
+        handleBlockChange(event.getLevel(), event.getPos());
+    }
+
+    @SubscribeEvent
+    public void onEntityPlaceEvent(BlockEvent.EntityPlaceEvent event) {
+        handleBlockChange(event.getLevel(), event.getPos());
+    }
+
+    @SubscribeEvent
+    public void onEntityMultiPlaceEvent(BlockEvent.EntityMultiPlaceEvent event) {
+        for (net.minecraftforge.common.util.BlockSnapshot snapshot : event.getReplacedBlockSnapshots()) {
+            handleBlockChange(event.getLevel(), snapshot.getPos());
+        }
+    }
+
+    private void handleBlockChange(net.minecraft.world.level.LevelAccessor levelAccessor, BlockPos pos) {
+        if (config == null || levelAccessor.isClientSide()) {
             return;
         }
 
-        if (!(event.getLevel() instanceof ServerLevel level)) {
+        if (!(levelAccessor instanceof ServerLevel level)) {
             return;
         }
 
-        BlockPos pos = event.getPos();
         for (CameraZone camera : config.cameras.values()) {
             if (!camera.enabled || !camera.world.equals(level.dimension().location().toString())) {
                 continue;
@@ -76,18 +91,25 @@ public final class FraxyTimelapseMod {
                 continue;
             }
 
+            // Always accumulate changes
             int changes = pendingChanges.merge(camera.id, 1, Integer::sum);
+
+            // Check if we meet threshold
             if (changes < config.changeThreshold) {
                 continue;
             }
 
+            // Check if cooldown has expired
             long now = System.currentTimeMillis();
             long cooldownMs = config.cooldownSeconds * 1000L;
             long last = lastTriggerMs.getOrDefault(camera.id, 0L);
             if (now - last < cooldownMs) {
+                // If on cooldown, we just continue accumulating changes.
+                // We do NOT trigger until the NEXT event after cooldown expires.
                 continue;
             }
 
+            // We reached threshold AND cooldown expired. Reset counter and trigger.
             pendingChanges.put(camera.id, 0);
             lastTriggerMs.put(camera.id, now);
             triggerWebhook(camera, changes);
@@ -140,6 +162,12 @@ public final class FraxyTimelapseMod {
                 }
                 if (loaded.cameras == null) {
                     loaded.cameras = new LinkedHashMap<>();
+                }
+                if (loaded.webhookUrl == null) {
+                    loaded.webhookUrl = "";
+                }
+                if (loaded.webhookToken == null) {
+                    loaded.webhookToken = "";
                 }
                 return loaded;
             }

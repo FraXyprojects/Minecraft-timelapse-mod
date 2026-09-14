@@ -3,11 +3,11 @@ loaderVersion="[47,)"
 license="MIT"
 
 [[mods]]
-modId="fraxy_timelapse"
-version="${file.jarVersion}"
-displayName="FraXy Timelapse"
-authors="FraXyprojects"
-description='''Server-side change detector and webhook trigger for Minecraft timelapse snapshots.'''
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''${mod_description}'''
 
 [[dependencies.fraxy_timelapse]]
 modId="forge"

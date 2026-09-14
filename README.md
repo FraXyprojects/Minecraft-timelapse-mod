@@ -18,12 +18,14 @@ After the first server start, edit:
 
 `config/fraxy-timelapse.json`
 
+By default, `webhookUrl` and `webhookToken` are empty strings `""`. You must fill these in with your real webhook URL and bearer token for the webhook to fire.
+
 Example:
 
 ```json
 {
-  "webhookUrl": "https://fraxy-dynmap.fraxy.workers.dev/trigger",
-  "webhookToken": "CHANGE_ME",
+  "webhookUrl": "https://example.com/webhook",
+  "webhookToken": "YOUR_SECRET_TOKEN",
   "changeThreshold": 5,
   "cooldownSeconds": 600,
   "cameras": {
@@ -42,7 +44,7 @@ Example:
 }
 ```
 
-A block event inside an enabled camera zone increments that camera's counter. Once the threshold is reached and the camera is outside its cooldown window, the mod sends:
+A relevant block event (break, place, or multi-place) inside an enabled camera zone increments that camera's counter. Once the threshold is reached and the camera is outside its cooldown window, the mod sends:
 
 ```json
 {
@@ -61,9 +63,15 @@ Content-Type: application/json
 
 ## Important behavior
 
-The counter resets when a trigger is emitted. Changes occurring during the cooldown are still counted toward the next trigger.
+The counter resets when a trigger is emitted. Changes occurring during the cooldown are still counted toward the next trigger. Importantly, if the threshold is reached *during* a cooldown period, the webhook is **not** triggered instantly when the cooldown expires. Instead, it waits for the *next* valid block event to trigger the webhook.
 
-The current implementation listens to Forge `BlockEvent`s, so block place/break/related block events inside the configured cuboids are used as the change signal. It intentionally does not poll the world or call Browser Run itself.
+The current implementation listens to specific Forge block change events (BreakEvent, EntityPlaceEvent, EntityMultiPlaceEvent), so block place/break events inside the configured cuboids are used as the change signal. It avoids triggering on generic neighbor updates or internal block events. It intentionally does not poll the world or call Browser Run itself.
+
+## Troubleshooting
+
+- Ensure your `webhookUrl` and `webhookToken` are properly set.
+- Check that the `world` setting on your camera matches the dimension you are modifying.
+- If the webhook doesn't fire, keep in mind that you might still be in the 600-second cooldown window. Wait for the cooldown to expire and then modify another block.
 
 ## Build
 
