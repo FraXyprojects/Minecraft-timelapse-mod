@@ -102,5 +102,5 @@ publishing {
 }
 
 dependencies {
-    compileOnly 'us.dynmap:dynmap-api:3.7-beta-6'
+    compileOnly 'us.dynmap:DynmapCoreAPI:3.7-beta-6'
 }
