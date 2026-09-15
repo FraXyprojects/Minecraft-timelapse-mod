@@ -47,6 +47,56 @@ public final class FraxyTimelapseMod {
 
     public FraxyTimelapseMod() {
         MinecraftForge.EVENT_BUS.register(this);
+        org.dynmap.DynmapCommonAPIListener.register(new DynmapIntegration());
+    }
+
+    private static class DynmapIntegration extends org.dynmap.DynmapCommonAPIListener {
+        private static org.dynmap.DynmapCommonAPI api;
+        private static final java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+
+        @Override
+        public void apiEnabled(org.dynmap.DynmapCommonAPI dynmapCommonAPI) {
+            api = dynmapCommonAPI;
+        }
+
+        @Override
+        public void apiDisabled(org.dynmap.DynmapCommonAPI dynmapCommonAPI) {
+            api = null;
+        }
+
+        public static void triggerRenderAndWebhook(CameraZone camera, Runnable webhookTask, Runnable onFailure) {
+            try {
+                if (api == null) {
+                    // If Dynmap is not installed or enabled, just fire the webhook immediately on a separate thread to avoid blocking.
+                    scheduler.execute(webhookTask);
+                    return;
+                }
+
+                // Request Dynmap to render the volume
+                api.triggerRenderOfVolume(camera.world, camera.minX, camera.minY, camera.minZ, camera.maxX, camera.maxY, camera.maxZ);
+
+                /*
+                 * Dynmap's public API provides "triggerRenderOfVolume()" but no public render-completion callback.
+                 * The delay is therefore an intentional compatibility-safe approximation rather than a guaranteed render-completion signal.
+                 */
+                long delay = config.renderDelaySeconds > 0 ? config.renderDelaySeconds : 5;
+                scheduler.schedule(webhookTask, delay, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Throwable t) {
+                LOGGER.error("Failed to schedule Dynmap render and webhook for camera {}", camera.id, t);
+                onFailure.run();
+            }
+        }
+
+        public static void shutdown() {
+            if (scheduler != null && !scheduler.isShutdown()) {
+                scheduler.shutdownNow();
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public void onServerStopping(net.minecraftforge.event.server.ServerStoppingEvent event) {
+        DynmapIntegration.shutdown();
     }
 
     @SubscribeEvent
@@ -117,11 +167,23 @@ public final class FraxyTimelapseMod {
                 continue;
             }
 
-            triggerWebhook(camera, changes);
+            DynmapIntegration.triggerRenderAndWebhook(camera,
+                () -> triggerWebhook(camera, changes),
+                () -> inflightTriggers.remove(camera.id)
+            );
         }
     }
 
     private static void triggerWebhook(CameraZone camera, int changes) {
+        try {
+            triggerWebhookInternal(camera, changes);
+        } catch (Throwable t) {
+            LOGGER.error("Failed to construct or send webhook request for camera {}", camera.id, t);
+            inflightTriggers.remove(camera.id);
+        }
+    }
+
+    private static void triggerWebhookInternal(CameraZone camera, int changes) {
         if (config.webhookUrl == null || config.webhookUrl.isBlank() || config.webhookToken == null || config.webhookToken.isBlank()) {
             if (configWarned.add(camera.id)) {
                 LOGGER.warn("Camera {} reached threshold, but webhook is not configured. Config must not be empty.", camera.id);
@@ -217,6 +279,7 @@ public final class FraxyTimelapseMod {
         String webhookToken = "";
         int changeThreshold = 5;
         int cooldownSeconds = 600;
+        int renderDelaySeconds = 5;
         Map<String, CameraZone> cameras = new LinkedHashMap<>();
 
         static TimelapseConfig defaults() {
