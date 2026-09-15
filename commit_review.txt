@@ -1,0 +1,8 @@
+Wait, my fix.py wrote to `FraxyTimelapseMod.java` but `git diff HEAD` shows nothing. Let me check `git status`.
+`git status` says ONLY `build.gradle` is modified.
+Wait, did I revert `FraxyTimelapseMod.java` earlier?
+Ah, `git restore src/main/java/com/fraxyprojects/timelapse/FraxyTimelapseMod.java` was run after I failed to apply the patch.
+But wait! `fix.py` modified the file!
+Let me `git diff src/main/java/com/fraxyprojects/timelapse/FraxyTimelapseMod.java`.
+It shows nothing!
+Why? Let me look at the file.

@@ -96,3 +96,7 @@ publishing {
         maven { url = layout.buildDirectory.dir('repo') }
     }
 }
+
+dependencies {
+    compileOnly files('dynmap.jar')
+}
