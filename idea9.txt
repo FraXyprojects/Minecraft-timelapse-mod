@@ -1,2 +1,0 @@
-Oh I see! I ran `git restore` on the file, so it went back to the master branch version, wiping out ALL my `DynmapIntegration` code!
-I need to recreate the `DynmapIntegration` code in `FraxyTimelapseMod.java` exactly as I reported it. Let's do that right now!

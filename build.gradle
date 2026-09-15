@@ -17,6 +17,10 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 repositories {
     mavenCentral()
     maven {
+        name = 'Dynmap'
+        url = 'https://repo.mikeprimm.com/'
+    }
+    maven {
         name = 'MinecraftForge'
         url = 'https://maven.minecraftforge.net/'
     }
@@ -98,5 +102,5 @@ publishing {
 }
 
 dependencies {
-    compileOnly files('dynmap.jar')
+    compileOnly 'us.dynmap:dynmap-api:3.7-beta-6'
 }
